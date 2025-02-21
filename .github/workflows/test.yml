@@ -1,0 +1,99 @@
+name: Tests
+
+# When to run the workflow
+on:
+  # Run on all pushes to any branch
+  push:
+    branches: [ "**" ]
+  # Run on pull requests to main branch
+  pull_request:
+    branches: [ "main" ]
+  # Allow manual trigger from GitHub UI
+  workflow_dispatch:
+
+# Jobs to run
+jobs:
+  test:
+    # Run on latest Ubuntu
+    runs-on: ubuntu-latest
+    
+    # Test on multiple Python versions
+    strategy:
+      matrix:
+        python-version: ["3.8", "3.9", "3.10", "3.11"]
+
+    steps:
+    # Step 1: Check out the repository code
+    - uses: actions/checkout@v4
+      with:
+        fetch-depth: 0  # Fetch all history for all branches and tags
+    
+    # Step 2: Set up Python
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ matrix.python-version }}
+    
+    # Step 3: Install UV
+    - name: Install UV
+      run: |
+        curl -LsSf https://astral.sh/uv/install.sh | sh
+        echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+    
+    # Step 4: Dependencies Installation
+    # This step sets up a clean virtual environment and installs all required packages
+    # The -e flag installs in "editable" mode, which is ideal for development
+    # The .[dev] notation installs both main and development dependencies from pyproject.toml
+    - name: Install dependencies
+      run: |
+        # Create a fresh virtual environment
+        uv venv --python=${{ matrix.python-version }}
+        
+        # Activate the virtual environment
+        source .venv/bin/activate
+        
+        # Install the package and its dependencies
+        # -e: Install in editable mode (development mode)
+        # .[dev]: Install both main and development dependencies
+        uv pip install -e ".[dev]"
+    
+    # Step 5: Code Quality Checks
+    # Flake8 is a tool that combines:
+    # - PyFlakes (static analysis)
+    # - pycodestyle (style checks, formerly pep8)
+    # - Mccabe (complexity checker)
+    - name: Lint with flake8
+      run: |
+        source .venv/bin/activate
+        
+        # First run: Critical errors only
+        # E9: Syntax errors
+        # F63: Invalid syntax in string formatting
+        # F7: Semantic errors
+        # F82: Undefined variables
+        echo "Checking for critical Python errors..."
+        flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
+        
+        # Second run: Style warnings (non-blocking)
+        # --exit-zero: Don't fail on style warnings
+        # --max-complexity=10: Flag complex functions
+        echo "Checking code style..."
+        flake8 . --count --exit-zero --max-complexity=10 --statistics
+    
+    # Step 6: Static Type Checking
+    # MyPy checks type hints and catches potential type-related errors
+    # This helps catch bugs before runtime
+    - name: Type check with mypy
+      run: |
+        source .venv/bin/activate
+        
+        # Check both source code and tests
+        # --strict: Enable strict type checking
+        # --show-error-codes: Display error codes for better understanding
+        mypy src tests --strict --show-error-codes
+    
+    # Step 7: Run Tests
+    - name: Test with pytest
+      run: |
+        source .venv/bin/activate
+        pytest -v 
